@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Galaxy Gesture Zoom</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  canvas { display:block; }
+  video {
+    position:fixed;
+    right:10px;
+    bottom:10px;
+    width:150px;
+    opacity:0.25;
+  }
+  #overlay {
+    position:fixed;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:white;
+    font-size:120px;
+    font-family:Arial;
+    background:black;
+    z-index:10;
+  }
+  #info {
+    position:fixed;
+    top:10px;
+    left:10px;
+    color:lime;
+    font-family:monospace;
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">3</div>
+<div id="info">Show thumb + index</div>
+<video id="video" autoplay></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const video = document.getElementById("video");
+const info = document.getElementById("info");
+const overlay = document.getElementById("overlay");
+
+canvas.width = innerWidth;
+canvas.height = innerHeight;
+
+/* ⏱️ COUNTDOWN */
+let count = 3;
+let started = false;
+
+const timer = setInterval(() => {
+  count--;
+  if (count > 0) {
+    overlay.innerText = count;
+  } else {
+    overlay.innerText = "START";
+    setTimeout(() => {
+      overlay.style.display = "none";
+      started = true;
+    }, 700);
+    clearInterval(timer);
+  }
+}, 1000);
+
+/* 🌌 ZOOM + ROTATION */
+let zoom = 1;
+let smoothZoom = 1;
+let rotation = 0;
+
+/* 🌌 DENSE GALAXY BALL */
+const stars = [];
+const STAR_COUNT = 3000;
+
+for (let i = 0; i < STAR_COUNT; i++) {
+  const r = Math.random() ** 0.25 * canvas.width * 0.45;
+  const a1 = Math.random() * Math.PI * 2;
+  const a2 = Math.random() * Math.PI;
+
+  stars.push({
+    x: r * Math.cos(a1) * Math.sin(a2),
+    y: r * Math.sin(a1) * Math.sin(a2),
+    z: r * Math.cos(a2)
+  });
+}
+
+/* 🎨 DRAW LOOP */
+function draw() {
+  requestAnimationFrame(draw);
+  if (!started) return;
+
+  ctx.fillStyle = "black";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  rotation += 0.002; // 🌪️ galaxy rotation
+
+  for (let s of stars) {
+    // 🔄 rotate around Y axis
+    const rx = s.x * Math.cos(rotation) - s.z * Math.sin(rotation);
+    const rz = s.x * Math.sin(rotation) + s.z * Math.cos(rotation);
+
+    const scale = smoothZoom * (600 / (rz + 600));
+    const x = rx * scale + canvas.width / 2;
+    const y = s.y * scale + canvas.height / 2;
+    const r = scale * 1.2;
+
+    if (x < 0 || x > canvas.width || y < 0 || y > canvas.height) continue;
+
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = "white";
+    ctx.fill();
+  }
+
+  smoothZoom += (zoom - smoothZoom) * 0.15;
+}
+draw();
+
+/* ✋ HAND TRACKING */
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 0,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
+
+hands.onResults(res => {
+  if (!res.multiHandLandmarks.length) {
+    info.innerText = "No hand";
+    return;
+  }
+
+  const h = res.multiHandLandmarks[0];
+  const t = h[4];
+  const i = h[8];
+
+  // 🟢 debug dots
+  h.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "lime";
+    ctx.fill();
+  });
+
+  const dx = (t.x - i.x) * canvas.width;
+  const dy = (t.y - i.y) * canvas.height;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+
+  dist = Math.max(30, Math.min(dist, 220));
+
+  // 🔑 direct distance → zoom mapping
+  zoom = (dist - 30) / (220 - 30);
+  zoom = zoom * 7 + 0.4;
+
+  info.innerText = "Zoom: " + zoom.toFixed(2);
+});
+
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+camera.start();
+</script>
+
+</body>
+</html>
